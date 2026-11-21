@@ -2,7 +2,7 @@ name: update-snow-map
 
 on:
   schedule:
-    - cron: "50 * * * *"   # 매시 50분(UTC 기준 매시간이라 한국시간도 매시 50분)
+    - cron: "5-59/10 * * * *"   # 10분마다 (5, 15, 25 ... 55분)
   workflow_dispatch:        # 수동 실행 버튼
 
 permissions:
