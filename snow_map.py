@@ -32,12 +32,12 @@ PLACES = {
     "서상IC": (35.6550, 127.7180),
 }
 
+LABEL_DIR = {"추부IC": "left", "장수JC": "left"}  # 나머지는 오른쪽
+
 PTY_NAME = {"0": "없음", "1": "비", "2": "비/눈", "3": "눈", "4": "소나기",
             "5": "빗방울", "6": "빗방울/눈날림", "7": "눈날림", "?": "자료 없음"}
-PTY_COLOR = {"0": "#9e9e9e", "1": "#2ecc71", "2": "#8e44ad", "3": "#1e6fff",
-             "4": "#2ecc71", "5": "#2ecc71", "6": "#8e44ad", "7": "#1e6fff", "?": "#333333"}
-SHORT = {"0": "·", "1": "비", "2": "비눈", "3": "눈", "4": "소나기",
-         "5": "빗방울", "6": "빗방울눈", "7": "눈날림", "?": "?"}
+PTY_COLOR = {"0": "#9ca3af", "1": "#059669", "2": "#7c3aed", "3": "#2563eb",
+             "4": "#059669", "5": "#059669", "6": "#7c3aed", "7": "#2563eb", "?": "#374151"}
 WEEK = "월화수목금토일"
 
 
@@ -119,11 +119,23 @@ def _fetch(endpoint, nx, ny, base_date, base_time, rows):
             r = requests.get(url, params=params, timeout=30)
             r.raise_for_status()
             items = r.json()["response"]["body"]["items"]["item"]
-            return {(i["fcstDate"], i["fcstTime"]): i["fcstValue"] for i in items if i["category"] == "PTY"}
+            acc = {}
+            for i in items:
+                if i["category"] in ("PTY", "TMP", "T1H"):
+                    acc.setdefault((i["fcstDate"], i["fcstTime"]), {})[i["category"]] = i["fcstValue"]
+            # {(날짜, 시각): (강수형태, 기온)}
+            return {k: (v["PTY"], v.get("TMP", v.get("T1H"))) for k, v in acc.items() if "PTY" in v}
         except Exception as e:
             last = e
             time.sleep(2)
     raise last
+
+
+def to_temp(v):
+    try:
+        return int(round(float(v)))
+    except Exception:
+        return None
 
 
 def hour_label(dt):
@@ -132,50 +144,71 @@ def hour_label(dt):
 
 UI = """
 <style>
-#ctl{position:fixed;bottom:30px;left:50%;transform:translateX(-50%);z-index:9999;background:#fff;
-  padding:8px 12px;border:1px solid #888;border-radius:8px;font-size:14px;text-align:center}
-#ctl button{font-size:16px;padding:2px 10px}
-#ctl select{font-size:15px}
-#rng{width:300px;margin-top:6px}
-#panel{position:fixed;top:10px;right:10px;z-index:9999;background:rgba(255,255,255,.96);
-  border:1px solid #888;border-radius:8px;max-height:calc(100vh - 20px);overflow:auto}
-#upd{font-size:11px;color:#666;padding:4px 8px}
-#legend{position:fixed;bottom:30px;left:30px;z-index:9999;background:#fff;padding:10px;
-  border:1px solid #888;font-size:13px}
-#panel table{border-collapse:collapse;font-size:12px}
-#panel th{position:sticky;top:0;background:#fff;z-index:2;padding:3px;font-size:11px}
-#panel td{padding:2px 3px}
-#panel td.t{padding:2px 6px;font-weight:bold;white-space:nowrap}
-#panel td.c{text-align:center;min-width:46px;border:1px solid #fff}
-#panel td.d{background:#333;color:#fff;font-weight:bold;padding:2px 6px}
+html,body{font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;color:#111827}
+.card{background:rgba(255,255,255,.97);border-radius:14px;box-shadow:0 4px 18px rgba(0,0,0,.2)}
+#head{position:fixed;top:12px;left:12px;z-index:9999;width:330px;padding:14px 16px;box-sizing:border-box}
+#head .top{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;color:#6b7280}
+#head .ttl{font-weight:800;font-size:14px;color:#111827}
+#when{font-size:24px;font-weight:800;margin:8px 0}
+#sum{border-radius:10px;padding:9px 11px;font-size:14px;font-weight:700;line-height:1.45}
+#sum.snow{background:#dbeafe;color:#1e40af}
+#sum.mix{background:#ede9fe;color:#5b21b6}
+#sum.rain{background:#d1fae5;color:#065f46}
+#sum.clear{background:#f3f4f6;color:#374151}
+#tmp{font-size:12px;color:#6b7280;margin-top:6px}
+#head .row{display:flex;gap:8px;align-items:center;margin-top:12px}
+#head .row button{border:0;background:#111827;color:#fff;border-radius:10px;width:42px;height:38px;font-size:15px;cursor:pointer}
+#rng{flex:1;accent-color:#111827;min-width:0}
+#legend{font-size:11px;color:#6b7280;margin-top:10px}
+#panel{position:fixed;top:12px;right:12px;z-index:9999;display:flex;flex-direction:column;
+  max-height:calc(100vh - 24px);overflow:hidden}
+#grab{display:none}
+#scroll{overflow:auto}
+#panel table{border-collapse:separate;border-spacing:0;font-size:12px;width:100%}
+#panel th{position:sticky;top:0;background:#fff;z-index:2;padding:9px 2px;font-size:11px;color:#6b7280;
+  font-weight:700;border-bottom:1px solid #e5e7eb}
+#panel td{padding:0}
+#panel td.t{padding:7px 9px;font-weight:700;white-space:nowrap;color:#374151;border-radius:8px 0 0 8px}
+#panel td.c{text-align:center;padding:7px 2px;min-width:50px;font-weight:700;white-space:nowrap;
+  border:2px solid #fff;border-radius:8px}
+#panel td.d{background:#f3f4f6;color:#374151;font-weight:800;padding:5px 9px;font-size:11px}
+#panel tr.r{cursor:pointer}
+#panel tr.r:hover td.t{background:#f3f4f6}
+#panel tr.sel td.t{background:#111827;color:#fff}
+#panel tr.sel td.c{box-shadow:inset 0 0 0 2px #111827}
+.lbl{background:#fff;border:0;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:600;
+  color:#111827;box-shadow:0 1px 5px rgba(0,0,0,.35)}
+.leaflet-tooltip-left:before,.leaflet-tooltip-right:before{display:none}
+path.leaflet-interactive{filter:drop-shadow(0 1px 2px rgba(0,0,0,.45))}
 @media (max-width:700px){
-  #ctl{top:8px;bottom:auto;left:56px;right:8px;transform:none;padding:6px 8px;font-size:13px}
-  #rng{width:100%;margin-top:4px}
-  #ctl select{font-size:14px;max-width:45vw}
-  #panel{top:auto;bottom:0;left:0;right:0;max-height:42vh;border-radius:10px 10px 0 0;
-         border-left:0;border-right:0;border-bottom:0}
-  #panel table{width:100%}
-  #panel th{font-size:10px;padding:4px 1px}
-  #panel td{padding:5px 1px;font-size:13px}
-  #panel td.t{padding:5px 4px;font-size:12px}
-  #panel td.c{min-width:0}
-  #legend{display:none}
+  #head{top:8px;left:8px;right:8px;width:auto;padding:9px 12px}
+  #head .top{font-size:11px}
+  #when{font-size:19px;margin:4px 0 6px}
+  #sum{font-size:13px;padding:7px 9px}
+  #tmp{margin-top:4px}
+  #head .row{margin-top:8px}
+  #head .row button{height:34px}
+  #legend{margin-top:6px}
+  .leaflet-control-zoom{display:none}
+  #panel{top:auto;left:0;right:0;bottom:0;max-height:40vh;border-radius:16px 16px 0 0}
+  #grab{display:block;text-align:center;font-size:12px;font-weight:700;color:#6b7280;padding:9px 0 7px;cursor:pointer}
+  #panel.min #scroll{display:none}
+  #panel th{font-size:10px;padding:7px 1px}
+  #panel td.t{padding:8px 5px;font-size:12px}
+  #panel td.c{min-width:0;padding:8px 1px;font-size:12px}
 }
 </style>
-<div id="ctl">
-  <button id="prev">◀</button>
-  <select id="sel"></select>
-  <button id="next">▶</button><br>
-  <input type="range" id="rng">
+<div id="head" class="card">
+  <div class="top"><span class="ttl">출근길 눈·비 예보</span><span id="upd">__UPDATED__</span></div>
+  <div id="when"></div>
+  <div id="sum"></div>
+  <div id="tmp"></div>
+  <div class="row"><button id="prev">◀</button><input type="range" id="rng"><button id="next">▶</button></div>
+  <div id="legend">❄ 눈 &nbsp;🌨 비/눈 &nbsp;💧 비 &nbsp;· 없음 &nbsp;(숫자는 기온 ℃)</div>
 </div>
-<div id="panel"><div id="upd">__UPDATED__</div></div>
-<div id="legend">
-  <b>그 시각 예보</b><br>
-  <span style="color:#1e6fff">●</span> 눈 / 눈날림<br>
-  <span style="color:#8e44ad">●</span> 비/눈<br>
-  <span style="color:#2ecc71">●</span> 비 / 소나기 / 빗방울<br>
-  <span style="color:#9e9e9e">●</span> 없음<br>
-  <span style="color:#333">●</span> 자료 없음
+<div id="panel" class="card">
+  <div id="grab">▾ 시간별 표 접기</div>
+  <div id="scroll"></div>
 </div>
 """
 
@@ -183,15 +216,20 @@ JS = """
 window.addEventListener('load', function() {
   var MAP = __MAP__;
   var PLACES = __PLACES__, TIMES = __TIMES__, KEYS = __KEYS__, TD = __TD__;
-  var NAMES = __NAMES__, COLORS = __COLORS__, SHORT = __SHORT__;
+  var NAMES = __NAMES__, COLORS = __COLORS__, DIRS = __DIRS__;
+  var ICON = {'3':'❄','7':'❄','2':'🌨','6':'🌨','1':'💧','4':'💧','5':'💧'};
+  function fmt(t) { return (t === null || t === undefined) ? '' : String(t).replace('-', '−') + '°'; }
+
+  L.control.zoom({position: 'bottomleft'}).addTo(MAP);
   var mk = [], rows = [];
   PLACES.forEach(function(p) {
-    var c = L.circleMarker([p.lat, p.lon], {radius: 15, color: '#222', weight: 2, fillOpacity: 0.92}).addTo(MAP);
-    c.bindTooltip('', {permanent: true, direction: 'right', offset: [14, 0]});
+    var c = L.circleMarker([p.lat, p.lon], {radius: 8, color: '#fff', weight: 2.5, fillOpacity: 1}).addTo(MAP);
+    var left = DIRS[p.name] === 'left';
+    c.bindTooltip('', {permanent: true, direction: left ? 'left' : 'right',
+                       offset: [left ? -9 : 9, 0], className: 'lbl'});
     mk.push(c);
   });
 
-  var panel = document.getElementById('panel');
   var tbl = document.createElement('table');
   var h = '<tr><th>시각</th>';
   PLACES.forEach(function(p) { h += '<th>' + p.name + '</th>'; });
@@ -203,40 +241,62 @@ window.addEventListener('load', function() {
       var dc = tbl.insertRow().insertCell();
       dc.colSpan = PLACES.length + 1; dc.className = 'd'; dc.textContent = t[0];
     }
-    var tr = tbl.insertRow();
-    tr.style.cursor = 'pointer';
+    var tr = tbl.insertRow(); tr.className = 'r';
     var c0 = tr.insertCell(); c0.className = 't'; c0.textContent = t[1];
     PLACES.forEach(function(p) {
-      var code = p.codes[i], c = tr.insertCell();
-      c.className = 'c'; c.textContent = SHORT[code];
-      c.style.background = (code === '0') ? '#f1f1f1' : COLORS[code];
-      c.style.color = (code === '0') ? '#bbb' : '#fff';
-      if (code !== '0') c.style.fontWeight = 'bold';
+      var code = p.codes[i], c = tr.insertCell(), tp = fmt(p.temps[i]);
+      if (code === '?') tp = '?'; else if (!tp && code === '0') tp = '·';
+      c.className = 'c';
+      c.textContent = (ICON[code] ? ICON[code] + ' ' : '') + tp;
+      c.style.background = (code === '0') ? '#f3f4f6' : COLORS[code];
+      c.style.color = (code === '0') ? '#6b7280' : '#fff';
     });
     tr.onclick = function() { show(i); };
     rows.push(tr);
   });
-  panel.appendChild(tbl);
+  document.getElementById('scroll').appendChild(tbl);
 
-  var sel = document.getElementById('sel'), rng = document.getElementById('rng');
-  TIMES.forEach(function(t, i) { var o = document.createElement('option'); o.value = i; o.text = t; sel.appendChild(o); });
+  var panel = document.getElementById('panel'), head = document.getElementById('head');
+  var rng = document.getElementById('rng'), sum = document.getElementById('sum');
   rng.min = 0; rng.max = TIMES.length - 1; rng.step = 1;
+  var grab = document.getElementById('grab');
+  grab.onclick = function() {
+    var min = panel.classList.toggle('min');
+    grab.textContent = min ? '▴ 시간별 표 보기' : '▾ 시간별 표 접기';
+  };
 
+  var cur = 0;
   function show(i) {
-    i = Math.max(0, Math.min(TIMES.length - 1, i));
-    sel.value = i; rng.value = i;
-    rows.forEach(function(r, k) { r.style.outline = (k === i) ? '3px solid #000' : 'none'; r.style.outlineOffset = '-3px'; });
+    i = Math.max(0, Math.min(TIMES.length - 1, i)); cur = i; rng.value = i;
+    document.getElementById('when').textContent = TIMES[i];
+    rows.forEach(function(r, k) { r.classList.toggle('sel', k === i); });
     if (rows[i].scrollIntoView) rows[i].scrollIntoView({block: 'nearest'});
+
+    var g = {snow: [], mix: [], rain: [], unk: 0}, temps = [];
     PLACES.forEach(function(p, j) {
-      var code = p.codes[i];
+      var code = p.codes[i], tp = p.temps[i];
+      if (code === '3' || code === '7') g.snow.push(p.name);
+      else if (code === '2' || code === '6') g.mix.push(p.name);
+      else if (code === '1' || code === '4' || code === '5') g.rain.push(p.name);
+      else if (code === '?') g.unk++;
+      if (tp !== null && tp !== undefined) temps.push(tp);
       mk[j].setStyle({fillColor: COLORS[code]});
-      mk[j].setTooltipContent('<b>' + p.name + '</b> ' + NAMES[code]);
+      var state = ICON[code] ? NAMES[code] + ' ' : '';
+      mk[j].setTooltipContent('<b>' + p.name + '</b> ' + state + fmt(tp));
     });
+    var lines = [];
+    if (g.snow.length) lines.push('❄ 눈 · ' + g.snow.join(', '));
+    if (g.mix.length) lines.push('🌨 비/눈 · ' + g.mix.join(', '));
+    if (g.rain.length) lines.push('💧 비 · ' + g.rain.join(', '));
+    if (!lines.length) lines.push(g.unk === PLACES.length ? '자료 없음' : '✅ 비·눈 예보 없음');
+    sum.className = g.snow.length ? 'snow' : g.mix.length ? 'mix' : g.rain.length ? 'rain' : 'clear';
+    sum.innerHTML = lines.join('<br>');
+    var tmp = document.getElementById('tmp');
+    tmp.textContent = temps.length ? ('지점 기온 ' + fmt(Math.min.apply(null, temps)) + ' ~ ' + fmt(Math.max.apply(null, temps))) : '';
   }
-  sel.onchange = function() { show(parseInt(sel.value)); };
   rng.oninput = function() { show(parseInt(rng.value)); };
-  document.getElementById('prev').onclick = function() { show(parseInt(sel.value) - 1); };
-  document.getElementById('next').onclick = function() { show(parseInt(sel.value) + 1); };
+  document.getElementById('prev').onclick = function() { show(cur - 1); };
+  document.getElementById('next').onclick = function() { show(cur + 1); };
 
   // 열어 본 '지금' 시각(한국시간)에 맞는 줄을 처음에 선택
   function z(n) { return ('0' + n).slice(-2); }
@@ -246,14 +306,13 @@ window.addEventListener('load', function() {
   for (var i = 0; i < KEYS.length; i++) { if (KEYS[i] >= nk) { start = i; break; } }
   show(start);
 
-  // 핀 7개가 화면에 다 보이게 맞춤 (표/조작바에 가려지지 않게 여백)
+  // 핀 7개가 카드/표에 가려지지 않게 화면 맞춤
   try {
     var mobile = window.innerWidth <= 700;
     var b = L.latLngBounds(PLACES.map(function(p) { return [p.lat, p.lon]; }));
     MAP.fitBounds(b, {
-      paddingTopLeft: [20, mobile ? 70 : 40],
-      paddingBottomRight: [(mobile ? 20 : panel.offsetWidth + 30) + 90,
-                           mobile ? Math.round(window.innerHeight * 0.42) + 20 : 90],
+      paddingTopLeft: [mobile ? 20 : head.offsetWidth + 50, mobile ? head.offsetHeight + 24 : 50],
+      paddingBottomRight: [(mobile ? 20 : panel.offsetWidth + 40) + 80, mobile ? panel.offsetHeight + 24 : 50],
       maxZoom: 11
     });
   } catch (e) {}
@@ -286,13 +345,13 @@ def main():
         except Exception:
             pass
         per = {}
-        for (d, t), v in merged.items():
+        for (d, t), (v, tmp) in merged.items():
             dt = datetime.strptime(d + t, "%Y%m%d%H%M")
             if start <= dt <= limit:
-                per[dt.strftime("%Y%m%d%H")] = v
+                per[dt.strftime("%Y%m%d%H")] = (v, to_temp(tmp))
         data[name] = per
-        wet = [f"{hour_label(datetime.strptime(k, '%Y%m%d%H'))} {PTY_NAME[v]}"
-               for k, v in sorted(per.items()) if v != "0"]
+        wet = [f"{hour_label(datetime.strptime(k, '%Y%m%d%H'))} {PTY_NAME[v]}({tp}°)"
+               for k, (v, tp) in sorted(per.items()) if v != "0"]
         print(f"{name} (격자 {nx},{ny}): " + (", ".join(wet) if wet else "비/눈 예보 없음"))
 
     keys = sorted({k for per in data.values() for k in per})
@@ -305,14 +364,16 @@ def main():
         d = datetime.strptime(k, "%Y%m%d%H")
         td.append([f"{d:%m/%d}({WEEK[d.weekday()]})", f"{d:%H}시"])
     places_js = [{"name": n, "lat": la, "lon": lo,
-                  "codes": [data[n].get(k, "?") for k in keys]} for n, (la, lo) in PLACES.items()]
+                  "codes": [data[n].get(k, ("?", None))[0] for k in keys],
+                  "temps": [data[n].get(k, ("?", None))[1] for k in keys]}
+                 for n, (la, lo) in PLACES.items()]
 
     m = folium.Map(
         location=[36.0, 127.55], zoom_start=9,
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri",
+        attr="Esri", zoom_control=False,
     )
-    m.get_root().header.add_child(folium.Element('<meta http-equiv="refresh" content="1800">'))
+    m.get_root().header.add_child(folium.Element('<meta http-equiv="refresh" content="600">'))
     m.get_root().html.add_child(folium.Element(UI.replace("__UPDATED__", f"예보 갱신 {now:%m/%d %H:%M} 기준")))
     js = (JS.replace("__PLACES__", json.dumps(places_js, ensure_ascii=False))
             .replace("__TIMES__", json.dumps(times, ensure_ascii=False))
@@ -320,7 +381,7 @@ def main():
             .replace("__TD__", json.dumps(td, ensure_ascii=False))
             .replace("__NAMES__", json.dumps(PTY_NAME, ensure_ascii=False))
             .replace("__COLORS__", json.dumps(PTY_COLOR))
-            .replace("__SHORT__", json.dumps(SHORT, ensure_ascii=False))
+            .replace("__DIRS__", json.dumps(LABEL_DIR, ensure_ascii=False))
             .replace("__MAP__", m.get_name()))
     m.get_root().html.add_child(folium.Element("<script>" + js + "</script>"))
 
